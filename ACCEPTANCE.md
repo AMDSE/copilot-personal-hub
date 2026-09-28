@@ -22,3 +22,14 @@
 | Personal Consumer | BLOCKED: owner must import personal credentials |
 
 Do not claim full live acceptance until account prerequisites are supplied. The deployed interface and admin checks are tracked separately from Microsoft availability.
+
+## Deployed checks
+
+- 2026-09-28: gateway and private consumer transport both running/healthy; combined idle memory sample about 54MiB. Only 127.0.0.1:4143 is mapped; no public consumer transport port.
+- Original administrator password verified without reset. Secure + HttpOnly session cookie checked.
+- Original panels, accounts, usage, keys, proxy settings, personal model catalog and local conversation routes returned expected responses. Anonymous admin access and import return 401.
+- Synthetic personal account import, schedule disable, API key creation/revocation/deletion passed against the actual deployed Go container. Only these temporary records were removed. No Microsoft chat request was made.
+- Private transport: anonymous request 401; authenticated malformed request 400; Go container can reach its health endpoint on the private Docker network.
+- Public HTTPS root returns the original M365 Copilot2API panel; obsolete /console/ redirects to root. Source-side verification confirms personal import card exists.
+- Original legacy CSS block compares byte-for-byte equal to upstream; React theme tokens file hash equals upstream. Browser login/navigation/import interaction checked locally with synthetic credentials.
+- Previous Python main container stopped with restart disabled; its data/configuration retained for rollback. Other server services were not modified.
