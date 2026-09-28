@@ -1,5 +1,13 @@
 # Go-base reconstruction acceptance — 2026-09-28
 
+## Userscript 1.1.0 compatibility correction
+
+- Upstream Issue #7 reproduces the same copilot.com redirect; no fix or maintainer comment was present when checked. multi/fox scripts were inspected.
+- Five Node VM tests passed: panel opening on three personal hosts under a DOM that rejects innerHTML with TrustedHTML errors; new ChatHub classification without secret leakage; legacy ChatAI capture retained. This is an isolated simulation, not a logged-in Microsoft browser acceptance.
+- JavaScript syntax check passed. Shared keyboard handler is now registered once, avoiding a window/document double-toggle.
+- Personal UI uses DOM construction and a visible launcher. Current diagnostics mark new protocols unsupported rather than exporting credentials with an unverified meaning.
+- Real migrated-account capture/chat remain BLOCKED pending user-side browser diagnostics and protocol verification. Original live matrix remains incomplete.
+
 ## Local automated evidence
 
 - Original React build and TypeScript: passed.

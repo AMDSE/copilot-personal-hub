@@ -25,6 +25,14 @@ Consumer 组件仅执行 Ciallo 的 curl_cffi HTTP/WebSocket 通信；没有独�
 
 ## 接入个人账号
 
+### copilot.com 新入口（脚本 1.1.0）
+
+上游 Issue #7（https://github.com/MurasameCyan/Ciallo-Ms-365-OpenAI-Proxy-Docker/issues/7）报告同样的个人账号跳转问题；2026-09-28 检查时仍开放且无维护者回复，默认 multi 与 fox 分支脚本均未提供新版域名适配。报告中的新站点使用 Substrate ChatHub，不能只把旧版 Consumer URL 换成 copilot.com 就认为兼容。
+
+本项目脚本 1.1.0 增加新域名匹配、document-start 捕获、右下角入口、无 innerHTML 的个人面板和安全诊断，并消除快捷键重复监听。个人面板不再要求代理地址或 API Key，也不自动上传凭据。老版本需要手动更新并刷新 Copilot 标签页。
+
+检测到旧版 ChatAI 时允许导出；检测到新版 ChatHub 或未验证端点时明确提示不兼容。安全诊断只包含脚本版本、页面域名、布尔能力状态和协议类别，不含完整 WebSocket URL、账号标识或凭据。当前未实现已验证的新版 ChatHub 个人账号认证；不要将显示修复描述为新协议聊天已通过。
+
 1. 在自己的浏览器安装 Tampermonkey BETA；控制台账号页提供导出脚本。
 2. 登录 copilot.microsoft.com 并发送消息，点击脚本的“导出个人版凭据”。无需把管理员密码或 API Key 填入脚本。
 3. 在控制台账号页导入 JSON。凭据含 Cookie / Token，等同登录材料；不要公开，用完妥善移除下载文件。

@@ -1,8 +1,11 @@
 // ==UserScript==
 // @name         Copilot Personal Credentials Export (Go Console)
 // @namespace    https://m365.cloud.microsoft
-// @version      1.0.74
-// @description  提取 M365 Copilot 完整 Cookie（含 httpOnly）推送到代理服务实现登录
+// @version      1.1.0
+// @description  个人 Copilot 凭据本地导出与安全诊断；识别 copilot.com 和旧版站点，不上传凭据
+// @match        https://copilot.com/*
+// @match        https://www.copilot.com/*
+// @run-at       document-start
 // @match        https://m365.cloud.microsoft/*
 // @match        https://microsoft365.com/*
 // @match        https://*.microsoft365.com/*
@@ -30,7 +33,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '1.0.74';
+    const SCRIPT_VERSION = '1.1.0';
     const SUBSTRATE_WS_RE = /wss:\/\/substrate\.office\.com\/.*[?&]access_token=([^&]+)/;
     const M365_RT_CLIENT_ID = '4765445b-32c6-49b0-83e6-1d93765276ca';
     // Consumer (personal-account) Copilot puts its ChatAI token in the chat
@@ -43,7 +46,10 @@
     // Which product the current tab belongs to. The two Copilots live on
     // different hosts and need different pushes, so the panel leads with the
     // section that can actually work here and tucks the other one away.
-    const IS_CONSUMER_SITE = location.hostname === 'copilot.microsoft.com';
+    const IS_CONSUMER_SITE = ['copilot.microsoft.com', 'copilot.com', 'www.copilot.com'].includes(location.hostname);
+    const personalSocketKinds = new Set();
+    let personalStatusRefresh = null;
+    let personalWSHookInstalled = false;
     // Hosts that belong to the M365 (work/school) Copilot. The login domains are
     // deliberately on NEITHER list: mid-login we cannot tell which product the
     // user is heading for, so the panel falls back to showing both sections.
@@ -716,6 +722,14 @@
 
     // Intercept browser APIs on the real page (not in sandbox)
     const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    if (IS_CONSUMER_SITE && window.top === window.self) {
+        if (typeof GM_registerMenuCommand === 'function') {
+            GM_registerMenuCommand('打开个人版导出面板 v' + SCRIPT_VERSION, showPanelSafely);
+            GM_registerMenuCommand('复制安全诊断（不含凭据）', copyPersonalDiagnostics);
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountPersonalLauncher, {once:true});
+        else mountPersonalLauncher();
+    }
     const MEDIA_AUTH_HOST_RE = /(^|\.)(asyncgw\.teams\.microsoft\.com|teams\.microsoft\.com|officeapps\.live\.com)$/i;
     const MEDIA_AUTH_HEADER_NAMES = ['authorization', 'x-skypetoken', 'skypetoken'];
     const seenMediaAuthProbes = new Set();
@@ -1004,6 +1018,8 @@
 
     const OrigWebSocket = pageWindow.WebSocket;
     pageWindow.WebSocket = function(url, protocols) {
+        url = String(url);
+        observePersonalSocket(url);
         const match = url.match(SUBSTRATE_WS_RE);
         const consumerMatch = url.match(CONSUMER_WS_RE);
         const ws = new OrigWebSocket(url, protocols);
@@ -1080,6 +1096,7 @@
     pageWindow.WebSocket.OPEN = OrigWebSocket.OPEN;
     pageWindow.WebSocket.CLOSING = OrigWebSocket.CLOSING;
     pageWindow.WebSocket.CLOSED = OrigWebSocket.CLOSED;
+    personalWSHookInstalled = true;
 
     function getProxyBase() {
         const input = document.getElementById('m365-proxy-url');
@@ -1129,6 +1146,7 @@
 
     // Cross-origin fetch via GM_xmlhttpRequest
     function gmFetch(url, options) {
+        if (IS_CONSUMER_SITE) return Promise.reject(new Error('个人版导出脚本不向代理地址上传凭据，请使用本地 JSON 导出。'));
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: options.method || 'GET',
@@ -1611,13 +1629,118 @@
         }).join('');
     }
 
+    function observePersonalSocket(rawURL) {
+        try {
+            const endpoint = new URL(String(rawURL), location.href);
+            if (!['ws:', 'wss:'].includes(endpoint.protocol)) return;
+            if (endpoint.hostname === 'substrate.office.com' && endpoint.pathname.toLowerCase().includes('/chathub')) personalSocketKinds.add('substrate-chathub');
+            else if (endpoint.hostname === 'copilot.microsoft.com' && endpoint.pathname.startsWith('/c/api/chat')) personalSocketKinds.add('legacy-consumer');
+            else if (['copilot.com', 'www.copilot.com'].includes(endpoint.hostname)) personalSocketKinds.add('new-copilot-endpoint');
+            if (personalStatusRefresh) personalStatusRefresh();
+        } catch (_) {}
+    }
+
+    function personalDiagnostics() {
+        return {
+            scriptVersion: SCRIPT_VERSION,
+            pageHost: location.hostname,
+            topFrame: window.top === window.self,
+            cookieAPIAvailable: hasGMCookie(),
+            webSocketHookInstalled: personalWSHookInstalled,
+            legacyChatAITokenCaptured: Boolean(latestConsumerToken),
+            observedTransportKinds: [...personalSocketKinds],
+            backendSupports: 'legacy-consumer-only',
+            containsCredentials: false,
+        };
+    }
+
+    async function copyPersonalDiagnostics() {
+        const text = JSON.stringify(personalDiagnostics(), null, 2);
+        try {
+            await navigator.clipboard.writeText(text);
+            if (personalStatusRefresh) personalStatusRefresh('安全诊断已复制，不包含 Token、Cookie、邮箱或请求地址。');
+        } catch (_) {
+            showPanelSafely();
+            const root = document.getElementById('m365-token-panel')?.shadowRoot;
+            if (!root) return;
+            const output = document.createElement('textarea');
+            output.readOnly = true;
+            output.value = text;
+            output.setAttribute('aria-label', '安全诊断');
+            output.style.cssText = 'width:100%;height:170px;box-sizing:border-box;color:#172033;background:white;';
+            root.appendChild(output);
+            output.focus();
+            output.select();
+        }
+    }
+
+    function showPanelSafely() {
+        try { showPanel(); }
+        catch (error) { alert('导出面板创建失败：' + String(error?.name || 'Error') + '。请更新至 1.1.0；无需关闭浏览器安全设置。'); }
+    }
+
+    function mountPersonalLauncher() {
+        if (!IS_CONSUMER_SITE || window.top !== window.self || document.getElementById('copilot-export-launcher')) return;
+        const launcher = document.createElement('button');
+        launcher.id = 'copilot-export-launcher';
+        launcher.type = 'button';
+        launcher.textContent = '个人版导出 · v' + SCRIPT_VERSION;
+        launcher.style.cssText = 'all:initial;position:fixed!important;right:16px!important;bottom:20px!important;z-index:2147483647!important;display:block!important;visibility:visible!important;opacity:1!important;background:#0969da!important;color:white!important;padding:12px 16px!important;border-radius:12px!important;font:14px system-ui!important;cursor:pointer!important;';
+        launcher.addEventListener('click', showPanelSafely);
+        document.documentElement.appendChild(launcher);
+    }
+
+    function showPersonalPanel() {
+        if (window.top !== window.self) return;
+        document.getElementById('m365-token-panel')?.remove();
+        const host = document.createElement('div');
+        host.id = 'm365-token-panel';
+        host.style.cssText = 'all:initial;position:fixed!important;top:16px!important;right:16px!important;z-index:2147483647!important;display:block!important;visibility:visible!important;opacity:1!important;width:min(440px,calc(100vw - 32px))!important;';
+        const root = host.attachShadow({mode:'open'});
+        const card = document.createElement('section');
+        card.style.cssText = 'box-sizing:border-box;padding:20px;background:#ffffff;color:#172033;border:1px solid #ccd3df;border-radius:14px;box-shadow:0 12px 45px #0005;font:14px/1.7 system-ui;max-height:85vh;overflow:auto;';
+        const addText = (tag, text) => { const element = document.createElement(tag); element.textContent = text; card.appendChild(element); return element; };
+        addText('h3', '个人版 Copilot 凭据导出 · ' + SCRIPT_VERSION).style.margin = '0 0 10px';
+        addText('p', '当前站点：' + location.hostname + '。此工具仅本地导出，不需要填写代理地址、API Key 或微软密码。');
+        const status = addText('p', '');
+        status.setAttribute('role', 'status');
+        const action = (label, handler) => {const button=document.createElement('button');button.type='button';button.textContent=label;button.style.cssText='padding:9px 12px;margin:5px 6px 5px 0;border:1px solid #ccd3df;border-radius:8px;background:#f2f5fa;color:#172033;font:inherit;cursor:pointer;';button.addEventListener('click',handler);card.appendChild(button);return button;};
+        const exportButton = action('导出个人版凭据 JSON', async () => {
+            exportButton.disabled = true;
+            try {
+                if (!latestConsumerToken) throw new Error('尚未捕获受支持的旧版 ChatAI 凭据。');
+                if (!hasGMCookie()) throw new Error('当前油猴不提供 Cookie API，请使用 Tampermonkey BETA 并确认扩展权限。');
+                const cookies = await getAllCookies();
+                await pushUserConsumer('', cookies);
+                status.textContent = '凭据已下载。请到你的管理面板导入；不要公开此文件。';
+            } catch (error) {
+                status.textContent = error instanceof Error ? error.message : '导出失败，请复制安全诊断。';
+            } finally { exportButton.disabled = !latestConsumerToken; }
+        });
+        personalStatusRefresh = (message) => {
+            exportButton.disabled = !latestConsumerToken;
+            if (message) {status.textContent=message;return;}
+            if (latestConsumerToken) status.textContent='已捕获旧版 ChatAI 凭据，可以尝试导出。实际模型调用仍需服务器验证。';
+            else if (personalSocketKinds.has('substrate-chathub')) status.textContent='检测到新版 Substrate ChatHub。上游 Issue #7 尚无适配方案，当前不能冒充旧版 ChatAI 凭据导出。请复制安全诊断。';
+            else if (personalSocketKinds.has('new-copilot-endpoint')) status.textContent='检测到新版 copilot.com 通信端点，尚未验证兼容性。请复制安全诊断，不要改用旧版 Token 强行导入。';
+            else status.textContent='请在聊天页面发送一条消息，再点“刷新状态”。新版 copilot.com 可能采用不同协议，脚本会明确显示检测结果。';
+        };
+        action('刷新状态', () => personalStatusRefresh());
+        action('复制安全诊断', copyPersonalDiagnostics);
+        action('关闭', () => {host.remove();personalStatusRefresh=null;});
+        addText('p', '若发送消息后仍未检测到连接，聊天可能运行在嵌入页面中。诊断仅包含版本、域名、能力状态和协议类别，不包含登录材料。').style.fontSize='12px';
+        root.appendChild(card);
+        document.documentElement.appendChild(host);
+        personalStatusRefresh();
+    }
+
     function togglePanel() {
         const existing = document.getElementById('m365-token-panel');
         if (existing) {
             existing.remove();
             return;
         }
-        showPanel();
+        showPanelSafely();
     }
 
     // ---- Panel sections, one per product ----------------------------------
@@ -1757,6 +1880,7 @@
     }
 
     function showPanel() {
+        if (IS_CONSUMER_SITE) { showPersonalPanel(); return; }
         if (document.getElementById('m365-token-panel')) {
             document.getElementById('m365-token-panel').remove();
         }
@@ -1853,12 +1977,11 @@
     }
 
     try {
-        if (typeof GM_registerMenuCommand === 'function') {
+        if (typeof GM_registerMenuCommand === 'function' && !IS_CONSUMER_SITE && window.top === window.self) {
             GM_registerMenuCommand('打开/关闭 M365 Proxy 面板', togglePanel);
         }
     } catch (e) {}
 
     // Show panel on demand via keyboard shortcut (Ctrl+Shift+M / Alt+Shift+M)
-    pageWindow.addEventListener('keydown', handlePanelShortcut, true);
     document.addEventListener('keydown', handlePanelShortcut, true);
 })();

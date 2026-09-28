@@ -13,7 +13,7 @@ export function ConsumerImport({push,onImported}:{push:(message:string,kind?:"su
       <input className="form-input" aria-label="个人凭据 JSON 文件" type="file" accept=".json,application/json" onChange={async event=>{const file=event.target.files?.[0];if(!file)return;if(file.size>2*1024*1024){push("文件不能超过 2MB","error");return;}setSnapshot(await file.text());event.target.value="";}}/>
       <textarea className="form-input" aria-label="个人凭据 JSON" autoComplete="off" spellCheck={false} value={snapshot} onChange={event=>setSnapshot(event.target.value)} placeholder="粘贴导出的个人账号凭据 JSON（包含敏感信息，不要公开）" style={{width:"100%",minHeight:110,marginTop:10}}/>
       <div style={{display:"flex",gap:10,alignItems:"center",marginTop:12}}><button className="btn primary" disabled={busy||!snapshot.trim()} onClick={async()=>{setBusy(true);try{const credentials=JSON.parse(snapshot);await api("/api/accounts/consumer",{method:"POST",body:JSON.stringify(credentials)});setSnapshot("");await onImported();push("个人凭据已导入，请到模型测试验证","success");}catch(error){push(error instanceof Error?error.message:"导入失败","error");}finally{setBusy(false);}}}>{busy?"正在保存…":"保存个人账号"}</button><button className="btn" onClick={()=>setSnapshot("")}>清空内容</button></div>
-      <p style={{fontSize:12,color:"var(--muted)",marginBottom:0}}>凭据加密保存；只导入你有权使用的账号。支持匹配账号的刷新令牌自动续期，Cookie 失效或微软拒绝时需重新导出。个人版模型不等同于企业 GPT / Claude 型号，企业云端会话与记忆接口不适用个人版。</p>
+      <p style={{fontSize:12,color:"var(--muted)",marginBottom:0}}>若跳转到 copilot.com，请安装 v1.1.0 脚本，点击右下角“个人版导出”。新站点可能使用 Substrate ChatHub（上游 Issue #7 仍未解决）；当前后端仅兼容旧版个人 ChatAI 协议。无法导出时复制安全诊断，不要公开 Cookie 或 Token。凭据加密保存，失效时需重新导入。</p>
     </div>}
   </div>;
 }

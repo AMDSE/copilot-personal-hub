@@ -501,7 +501,7 @@ if (response.output_text) {
             <textarea class="form-input" id="consumerSnapshot" aria-label="个人凭据 JSON" placeholder="也可在这里粘贴凭据 JSON；内容敏感，不要公开" autocomplete="off" spellcheck="false" style="width:100%;min-height:90px;margin:10px 0"></textarea>
             <button class="btn primary" id="consumerSave" onclick="importConsumerSnapshot()">导入 / 更新个人账号</button>
             <button class="btn" onclick="document.getElementById('consumerSnapshot').value=''">清空</button>
-            <p class="form-hint" style="margin-top:12px">凭据加密保存；匹配账号的刷新令牌可自动续期。Cookie 失效或微软拒绝时请重新导出。凭据已导入不等于真实聊天已验证；个人模式不冒充企业模型。</p>
+            <p class="form-hint" style="margin-top:12px">若跳转到 copilot.com，请安装 v1.1.0 脚本，点击右下角“个人版导出”。新站点可能使用 Substrate ChatHub（上游 Issue #7 尚无修复）；当前后端仅兼容旧版个人 ChatAI 协议。无法导出时复制安全诊断，不要公开 Cookie 或 Token。凭据已导入不等于聊天已验证。</p>
           </div>
         </div>
         <div class="page-head">
