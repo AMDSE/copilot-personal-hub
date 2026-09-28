@@ -1,0 +1,43 @@
+__pycache__/
+node_modules/
+console/dist/
+*.tar.gz
+*.pyc
+.env
+.chrome-profile/
+
+# Debug scratch dirs and runtime credential/state files (never commit)
+tmp-debug*/
+accounts.json
+.enc_key
+keys.json
+sessions.json
+media_proxy_secret
+# One-off refresh_token capture / POC scratch (contain live credentials)
+setup.json
+*.rt.json
+poc_refresh_token_exchange.py
+# Protocol probes: throwaway scripts + the browser profile they sign in with
+.probe/
+get_rt.console.js
+# Temporary authenticated proxy pool exports (contain live credentials)
+proxies_*.txt
+# Scratch notes holding live API keys / endpoints for manual probing
+/api.txt
+
+# Local Python environment and tool caches
+/.venv/
+/.pytest_cache/
+/.ruff_cache/
+
+# Local coding-agent state; plans/specs stay local and are not pushed
+/.claude/
+/.superpowers/
+/docs/superpowers/
+/.mossx/
+
+# Scratch dirs for one-off investigations. .tmp-github-scan holds clones of
+# third-party repos surveyed in docs/upstream-candidates.md -- some are AGPL or
+# have broken attribution, so their source must never enter this Apache-2.0 tree.
+/.tmp/
+/.tmp-github-scan/

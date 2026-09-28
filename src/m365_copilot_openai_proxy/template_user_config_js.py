@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+_USER_CONFIG_JS = """function renderToneOptions(){
+  const sel=document.getElementById('tone');if(!sel||!toneOptions.length)return;
+  const cur=sel.value;
+  sel.innerHTML='';
+  toneOptions.forEach(o=>{
+    const opt=document.createElement('option');
+    opt.value=o.value;
+    opt.textContent=lang==='zh'?(o.label_zh||o.label):(o.label_en||o.label);
+    sel.appendChild(opt);
+  });
+  if(cur)sel.value=cur;
+  initGlassSelect(sel.parentElement);
+  refreshGlassSelect(sel);
+  renderRunPermissionOptions();
+  renderToolPlanningOptions();
+}
+// Same shape as tool planning below: '' means inherit. Without that option every
+// save of this card pinned a concrete value, so a global later tightened to
+// read_only applied to nobody who had ever touched the card -- and the pinned
+// value was 'full', i.e. the card handed out the very grant the global withheld.
+// Widening is refused server-side (effective_run_permission), so a 'full' pin
+// under a read_only global is not an escalation, just a lie on screen.
+let _defaultRunPermission='full';
+function renderRunPermissionOptions(){
+  const sel=document.getElementById('user-run-permission');if(!sel)return;
+  const cur=sel.value;
+  const opts=['read_only','full'];
+  sel.innerHTML='<option value="">'+t('run_permission_inherit')+'</option>'+opts.map(m=>'<option value="'+m+'">'+t('run_permission_'+m)+'</option>').join('');
+  sel.value=opts.indexOf(cur)>=0?cur:'';
+  const dl=document.getElementById('user-run-permission-default');
+  if(dl)dl.textContent=t('run_permission_'+(_defaultRunPermission||'full'));
+  sel.dataset.glassReady='';
+  const old=sel.nextElementSibling;if(old&&old.classList.contains('glass-select'))old.remove();
+  initGlassSelect(sel.parentElement);
+  refreshGlassSelect(sel);
+}
+function setRunPermission(value,fallbackDefault){
+  if(fallbackDefault)_defaultRunPermission=fallbackDefault;
+  const sel=document.getElementById('user-run-permission');if(!sel)return;
+  renderRunPermissionOptions();
+  sel.value=value||'';
+  refreshGlassSelect(sel);
+}
+// The global template's current value, so the "inherit" option can say what it
+// resolves to -- /user is the only place a user ever sees the global setting.
+let _defaultToolPlanning='auto';
+function renderToolPlanningOptions(){
+  const sel=document.getElementById('user-tool-planning');if(!sel)return;
+  const cur=sel.value;
+  const opts=['auto','native','router','studio'];
+  sel.innerHTML='<option value="">'+t('tool_planning_inherit')+'</option>'+opts.map(m=>'<option value="'+m+'">'+t('tool_planning_'+m)+'</option>').join('');
+  sel.value=opts.indexOf(cur)>=0?cur:'';
+  // The global's own value goes in the tip, not in the option label: spelled out
+  // there it wrapped out of a 180px trigger, and the tip has room to name it.
+  const dl=document.getElementById('user-tool-planning-default');
+  if(dl)dl.textContent=t('tool_planning_'+(_defaultToolPlanning||'auto'));
+  sel.dataset.glassReady='';
+  const old=sel.nextElementSibling;if(old&&old.classList.contains('glass-select'))old.remove();
+  initGlassSelect(sel.parentElement);
+  refreshGlassSelect(sel);
+}
+function setToolPlanning(value,fallbackDefault){
+  if(fallbackDefault)_defaultToolPlanning=fallbackDefault;
+  const sel=document.getElementById('user-tool-planning');if(!sel)return;
+  renderToolPlanningOptions();
+  sel.value=value||'';
+  refreshGlassSelect(sel);
+}
+function flash(id){const s=document.getElementById(id);if(!s)return;s.textContent=t('saved');s.style.opacity='1';setTimeout(()=>{s.style.opacity='0'},1500)}
+async function saveTone(){
+  const tone=document.getElementById('tone').value;
+  const model_alias=document.getElementById('user-model-alias')?.value||'';
+  const time_zone=document.getElementById('user-time-zone')?.value||'';
+  const run_permission=document.getElementById('user-run-permission')?.value||'';
+  const tool_planning_mode=document.getElementById('user-tool-planning')?.value||'';
+  const media_proxy_suffixes=document.getElementById('user-media-suffix')?.value||'';
+  const ws_idle_timeout_minutes=Number(document.getElementById('user-ws-idle-timeout')?.value||0);
+  userTimeZone=time_zone;
+  try{
+    const r=await fetch('/user/tone',{method:'POST',headers:authHeaders(),body:JSON.stringify({tone:tone,model_alias:model_alias,time_zone:time_zone,run_permission:run_permission,tool_planning_mode:tool_planning_mode,ws_idle_timeout_minutes:ws_idle_timeout_minutes,media_proxy_suffixes:media_proxy_suffixes})});
+    if(r.ok){const d=await r.json();document.getElementById('user-model-alias').value=d.model_alias||'';userTimeZone=d.time_zone||'';document.getElementById('user-time-zone').value=userTimeZone;const uwit=document.getElementById('user-ws-idle-timeout');if(uwit&&document.activeElement!==uwit)uwit.value=(d.ws_idle_timeout_minutes>0)?d.ws_idle_timeout_minutes:'';setRunPermission(d.run_permission,d.default_run_permission);setToolPlanning(d.tool_planning_mode,d.default_tool_planning_mode);const ums=document.getElementById('user-media-suffix');if(ums&&document.activeElement!==ums)ums.value=(d.media_proxy_suffixes||[]).join('\\n');flash('tone-msg')}
+  }catch(e){}
+}
+async function saveToolPrompt(){
+  const p=document.getElementById('tool-prompt').value;
+  try{await fetch('/user/tool-prompt',{method:'POST',headers:authHeaders(),body:JSON.stringify({tool_prompt:p})});flash('tool-msg')}catch(e){}
+}
+async function unlockSysPrompt(){
+  if(!await userDialog(t('system_prompt_title'),t('system_prompt_warn'),t('confirm_btn')))return;
+  const l=document.getElementById('sys-prompt-locked');
+  const e=document.getElementById('sys-prompt-editor');
+  if(l)l.style.display='none';
+  if(e)e.style.display='block';
+}
+async function saveSysPrompt(){
+  const p=document.getElementById('sys-prompt').value;
+  try{await fetch('/user/system-prompt',{method:'POST',headers:authHeaders(),body:JSON.stringify({system_prompt:p})});flash('sys-msg')}catch(e){}
+}
+async function resetSysPrompt(){
+  if(!await userDialog(t('system_prompt_title'),t('sys_prompt_reset_confirm'),t('confirm_btn')))return;
+  document.getElementById('sys-prompt').value='';
+  try{await fetch('/user/system-prompt',{method:'POST',headers:authHeaders(),body:JSON.stringify({system_prompt:''})});flash('sys-msg')}catch(e){}
+}
+"""

@@ -1,0 +1,292 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import secrets
+import threading
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+from .account_crypto import AccountCipher, load_or_create_key
+from .atomic_write import write_text_atomic
+
+# API-key field values encrypted at rest in keys.json. The raw key secret and
+# the login password material would let anyone who reads a leaked/backed-up
+# keys.json authenticate as the user, so they are AES-256-GCM encrypted with the
+# same data-dir key as accounts.json. Non-sensitive metadata (name, account_id,
+# tone, timestamps, ...) stays plaintext so the file remains greppable.
+SENSITIVE_KEY_FIELDS = (
+    "key",
+    "password",
+    "password_hash",
+    "password_salt",
+)
+
+
+def _hash_password(password: str, salt: str) -> str:
+    """Derive a PBKDF2-HMAC-SHA256 hash so plaintext passwords are never stored."""
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+
+
+@dataclass
+class ApiKey:
+    """A single API key bound to one account (scheme B: key -> one account).
+
+    Each key carries its own tone / tool_prompt / system_prompt so different
+    users get independent conversation modes and prompt tuning while sharing
+    the multi-tenant proxy. Disabled keys are rejected at the auth middleware.
+
+    Users log in to the self-service page with username + password (not the raw
+    API key). The password is stored only as a PBKDF2 hash + per-key salt.
+    """
+
+    id: str = field(default_factory=lambda: "key_" + uuid.uuid4().hex[:12])
+    key: str = field(default_factory=lambda: "sk-" + secrets.token_urlsafe(32))
+    name: str = ""
+    account_id: str = ""
+    enabled: bool = True
+    tone: str = "Magic"
+    tool_prompt: str = ""
+    system_prompt: str = ""
+    model_alias: str = ""
+    time_zone: str = ""
+    run_permission: str = ""  # "" = inherit global, "read_only" or "full"
+    # How this user's tools-bearing turns are planned. "" => inherit the global
+    # setting; "auto"/"native"/"router"/"studio" override it. Per-user because whether the
+    # inline contract is honoured depends on the tone this key is bound to, and
+    # the extra router turn is spent out of this key's own account quota.
+    tool_planning_mode: str = ""
+    # Per-user chat WebSocket idle timeout (minutes). 0 => inherit the global setting.
+    ws_idle_timeout_minutes: int = 0
+    # Per-user request ceiling (requests/minute) for /v1/ endpoints. 0 => inherit
+    # the global setting; a negative value disables limiting for this key alone.
+    # M365 publishes no rate-limit headers, so this is a self-imposed valve that
+    # stops one shared key from exhausting the account everyone else is on.
+    rate_limit_rpm: int = 0
+    # Per-user media proxy suffix override. Empty list => inherit the global
+    # runtime setting; a non-empty list fully replaces the global suffixes for
+    # this user's signed media URLs.
+    media_proxy_suffixes: list[str] = field(default_factory=list)
+    username: str = ""
+    password: str = ""  # Stored in plaintext so the admin UI can display it (per admin request).
+    password_hash: str = ""
+    password_salt: str = ""
+    role: str = "user"  # "user" (self-service only) or "admin" (reserved for elevated rights).
+    # Set when this key's account was taken over by another user pushing a token
+    # for the same M365 identity. Non-zero => show a "displaced" notice on the
+    # user page. Cleared to 0 once the user pushes/binds a fresh token again.
+    displaced_at: float = 0.0
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+
+    def set_password(self, password: str) -> None:
+        self.password = password
+        self.password_salt = secrets.token_hex(16)
+        self.password_hash = _hash_password(password, self.password_salt)
+
+    def check_password(self, password: str) -> bool:
+        if not self.password_hash or not self.password_salt:
+            return False
+        return secrets.compare_digest(self.password_hash, _hash_password(password, self.password_salt))
+
+
+class KeyStore:
+    """Thread-safe API key table with best-effort JSON persistence.
+
+    Lookups by the raw key string are O(1) via an in-memory index that is
+    rebuilt on every mutation so the auth middleware stays fast.
+    """
+
+    def __init__(self, persist_path: str | Path | None = None):
+        self._keys: dict[str, ApiKey] = {}  # id -> ApiKey
+        self._by_secret: dict[str, str] = {}  # raw key string -> id
+        self._by_username: dict[str, str] = {}  # lowercased username -> id
+        self._lock = threading.RLock()
+        self._persist_path = Path(persist_path) if persist_path else None
+        # At-rest encryption for sensitive fields, sharing the same data-dir key
+        # (.enc_key) as AccountStore. When cryptography is unavailable the cipher
+        # degrades to a plaintext passthrough (see account_crypto).
+        if self._persist_path is not None:
+            key = load_or_create_key(self._persist_path.parent / ".enc_key")
+        else:
+            key = None
+        self._cipher = AccountCipher(key)
+        if self._persist_path is not None:
+            self._load()
+
+    # ------------------------------------------------------------------ IO
+    def _reindex(self) -> None:
+        self._by_secret = {k.key: k.id for k in self._keys.values()}
+        self._by_username = {k.username.lower(): k.id for k in self._keys.values() if k.username}
+
+    def _load(self) -> None:
+        try:
+            data = json.loads(self._persist_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return
+        if not isinstance(data, dict):
+            return
+        for key_id, raw in data.items():
+            if not isinstance(raw, dict):
+                continue
+            # Decrypt sensitive fields in place. A field may be an encrypted
+            # envelope (new format) or legacy plaintext (pre-encryption); a field
+            # that fails to decrypt is dropped to its default rather than crashing
+            # the whole load (mirrors AccountStore._load).
+            for fname in SENSITIVE_KEY_FIELDS:
+                if fname in raw and self._cipher.is_envelope(raw[fname]):
+                    try:
+                        raw[fname] = self._cipher.decrypt_value(raw[fname])
+                    except ValueError:
+                        raw.pop(fname, None)
+            try:
+                self._keys[key_id] = ApiKey(
+                    id=raw.get("id", key_id),
+                    key=raw["key"],
+                    name=raw.get("name", ""),
+                    account_id=raw.get("account_id", ""),
+                    enabled=bool(raw.get("enabled", True)),
+                    tone=raw.get("tone", "Magic"),
+                    tool_prompt=raw.get("tool_prompt", ""),
+                    system_prompt=raw.get("system_prompt", ""),
+                    model_alias=raw.get("model_alias", ""),
+                    time_zone=raw.get("time_zone", ""),
+                    run_permission=raw.get("run_permission", ""),
+                    tool_planning_mode=raw.get("tool_planning_mode", ""),
+                    ws_idle_timeout_minutes=int(raw.get("ws_idle_timeout_minutes", 0) or 0),
+                    rate_limit_rpm=int(raw.get("rate_limit_rpm", 0) or 0),
+                    media_proxy_suffixes=list(raw.get("media_proxy_suffixes", []) or []),
+                    username=raw.get("username", ""),
+                    password=raw.get("password", ""),
+                    password_hash=raw.get("password_hash", ""),
+                    password_salt=raw.get("password_salt", ""),
+                    role=raw.get("role", "user"),
+                    displaced_at=float(raw.get("displaced_at", 0.0)),
+                    created_at=float(raw.get("created_at", time.time())),
+                    updated_at=float(raw.get("updated_at", time.time())),
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        self._reindex()
+
+    def _save(self) -> None:
+        if self._persist_path is None:
+            return
+        with self._lock:
+            data = {key_id: asdict(k) for key_id, k in self._keys.items()}
+        # Encrypt sensitive field values before writing. asdict() returned fresh
+        # dicts, so mutating them here does not touch the in-memory ApiKeys. When
+        # encryption is disabled encrypt_value is an identity passthrough.
+        for record in data.values():
+            for fname in SENSITIVE_KEY_FIELDS:
+                if fname in record and record[fname] != "":
+                    record[fname] = self._cipher.encrypt_value(record[fname])
+        try:
+            write_text_atomic(
+                self._persist_path,
+                json.dumps(data, ensure_ascii=False, indent=2),
+                durable=True,
+            )
+        except OSError:
+            pass  # Persistence is best-effort; never break a request over a disk error
+
+    # -------------------------------------------------------------- queries
+    def get(self, key_id: str) -> ApiKey | None:
+        with self._lock:
+            return self._keys.get(key_id)
+
+    def resolve(self, raw_key: str) -> ApiKey | None:
+        """Look up an ApiKey by its raw secret string (used by auth middleware)."""
+        with self._lock:
+            key_id = self._by_secret.get(raw_key)
+            return self._keys.get(key_id) if key_id else None
+
+    def resolve_by_login(self, username: str, password: str) -> ApiKey | None:
+        """Look up an ApiKey by username + password (used by the user self-service login)."""
+        with self._lock:
+            key_id = self._by_username.get((username or "").strip().lower())
+            k = self._keys.get(key_id) if key_id else None
+            if k is not None and k.check_password(password):
+                return k
+            return None
+
+    def resolve_by_login_username(self, username: str) -> ApiKey | None:
+        """Look up an ApiKey by username only (used to enforce username uniqueness)."""
+        with self._lock:
+            key_id = self._by_username.get((username or "").strip().lower())
+            return self._keys.get(key_id) if key_id else None
+
+    def list(self) -> list[ApiKey]:
+        with self._lock:
+            return list(self._keys.values())
+
+    def list_for_account(self, account_id: str) -> list[ApiKey]:
+        with self._lock:
+            return [k for k in self._keys.values() if k.account_id == account_id]
+
+    # -------------------------------------------------------------- mutations
+    def add(self, name: str = "", account_id: str = "", tone: str = "Magic",
+            username: str = "", password: str = "", role: str = "user") -> ApiKey:
+        with self._lock:
+            k = ApiKey(name=name, account_id=account_id, tone=tone, username=username.strip(), role=role)
+            if password:
+                k.set_password(password)
+            self._keys[k.id] = k
+            self._reindex()
+            self._save()
+            return k
+
+    def update(self, key_id: str, **fields: Any) -> ApiKey | None:
+        """Update mutable fields. Pass password=<str> to (re)set the login password."""
+        allowed = {"name", "account_id", "enabled", "tone", "tool_prompt", "system_prompt", "model_alias", "time_zone", "run_permission", "tool_planning_mode", "ws_idle_timeout_minutes", "rate_limit_rpm", "media_proxy_suffixes", "username", "role", "displaced_at"}
+        with self._lock:
+            k = self._keys.get(key_id)
+            if k is None:
+                return None
+            password = fields.pop("password", None)
+            for name, value in fields.items():
+                if name in allowed:
+                    setattr(k, name, value.strip() if name == "username" and isinstance(value, str) else value)
+            if password:
+                k.set_password(password)
+            k.updated_at = time.time()
+            self._reindex()  # username may have changed
+            self._save()
+            return k
+
+    def regenerate_key(self, key_id: str) -> ApiKey | None:
+        """Issue a fresh secret for a key while keeping its id (and thus all
+        bindings, tone/prompt and session history) intact."""
+        with self._lock:
+            k = self._keys.get(key_id)
+            if k is None:
+                return None
+            k.key = "sk-" + secrets.token_urlsafe(32)
+            k.updated_at = time.time()
+            self._reindex()
+            self._save()
+            return k
+
+    def remove(self, key_id: str) -> bool:
+        with self._lock:
+            if key_id in self._keys:
+                del self._keys[key_id]
+                self._reindex()
+                self._save()
+                return True
+            return False
+
+    def detach_account(self, account_id: str) -> None:
+        """Clear the binding on any keys pointing at a removed account."""
+        with self._lock:
+            changed = False
+            for k in self._keys.values():
+                if k.account_id == account_id:
+                    k.account_id = ""
+                    k.updated_at = time.time()
+                    changed = True
+            if changed:
+                self._save()
