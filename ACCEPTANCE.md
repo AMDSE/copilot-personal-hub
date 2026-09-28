@@ -1,32 +1,24 @@
-# Acceptance status
+# Go-base reconstruction acceptance — 2026-09-28
 
-The upstream AGENTS.md requires live acceptance. Local tests alone are insufficient.
+## Local automated evidence
 
-| Live path | Status before account onboarding |
+- Original React build and TypeScript: passed.
+- Go complete package suite: passed in a fresh isolated test data directory. Reusing test data causes the upstream password rotation test to fail; this is not a production password change.
+- Go provider integration tests: encrypted credential persistence/reopen, identity mismatch rejection, admin-only import, redacted account listing, original management routes.
+- Consumer bridge: exact stream assembly, no duplicated event deltas, truncated stream rejection.
+- Go end-to-end protocol adapters against a simulated transport: Chat Completions, Responses, Messages; both streaming and non-streaming. This is NOT a live Microsoft model test.
+- Private Python transport: 3 tests passed (private authentication, streaming, secret-safe errors).
+- Credential exporter JavaScript syntax: passed.
+
+## Required live matrix
+
+| Path | Status |
 | --- | --- |
-| M365 direct/native | BLOCKED: no authorized organizational account supplied |
-| Router planning/tool | BLOCKED: no authorized upstream account supplied |
-| Studio planning/tool | BLOCKED: no Studio-capable account supplied |
-| Anthropic Messages tool loop | BLOCKED: no authorized upstream account supplied |
-| OpenAI Responses tool loop | BLOCKED: no authorized upstream account supplied |
-| Consumer personal chat | BLOCKED: owner must sign in and push own credentials |
+| M365 native | BLOCKED: no authorized organizational account |
+| Router planning / tool loop | BLOCKED: no live account credentials |
+| Studio planning / tool loop | BLOCKED: no licensed Studio account; not a consumer feature |
+| Anthropic Messages tool loop | BLOCKED: no live account credentials; protocol-level mock only |
+| OpenAI Responses tool loop | BLOCKED: no live account credentials; protocol-level mock only |
+| Personal Consumer | BLOCKED: owner must import personal credentials |
 
-Deployment health and administration tests do not establish Microsoft chat availability. Do not describe these six paths as passed until real requests and results are recorded without secrets.
-
-## Local checks on 2026-09-28
-
-## Deployed administration checks on 2026-09-28
-
-- New container is running and healthy, bound only to 127.0.0.1:4142, with a 640MiB memory ceiling. Idle sample about 90MiB.
-- Server smoke check passed: console/script/health, anonymous 401 responses, secure HttpOnly admin session, temporary account/key create-disable-delete. Temporary production smoke records removed.
-- Public HTTPS root redirects to /console/ and returns 200; /self-service and userscript return 200; unauthenticated /admin/accounts returns 401. Browser renders the deployed dashboard.
-- Old m365-copilot2api container stopped with restart=no. Original volume, image, configuration and credentials retained for rollback; no other services removed.
-- Microsoft live acceptance matrix above remains blocked by account authorization. Health checks are not a successful chat test.
-
-### Local test details
-
-- React TypeScript check and Vite production build: passed. npm audit: zero reported vulnerabilities at install time.
-- Focused console/auth/account/consumer tests: 61 passed.
-- Wider Python run, excluding two uncollectable test modules: 2074 passed, 3 skipped, 2 failed. Failures: absent upstream Docker CI workflow (not copied to this fork), optional Camoufox package not installed in the lightweight environment.
-- Full collection blockers: upstream packaging test assumes its original docker-compose.yml; studio diagnostic test refers to an untracked .probe script not present in upstream checkout. The fork uses compose.yaml. These have not been presented as successful tests.
-- New scripts/smoke.py verifies deployed administration and removes only its own temporary account/key. It does not call Microsoft or establish provider availability.
+Do not claim full live acceptance until account prerequisites are supplied. The deployed interface and admin checks are tracked separately from Microsoft availability.

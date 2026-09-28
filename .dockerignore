@@ -1,6 +1,11 @@
 __pycache__/
 *.pyc
 .env
+secrets/
+out/
+*.exe
+api-keys.json
+admin-password*
 .chrome-profile/
 .git/
 .github/

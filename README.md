@@ -1,45 +1,50 @@
-# Copilot Personal Hub
+# M365 Copilot2API + Personal Provider
 
-个人 Copilot 核心与中文管理界面的融合项目。后端基于 Ciallo，界面设计与导航参考 M365-Copilot2API，保留全部上游许可证与来源。不是微软官方 API。
+基于 HEXUXIU/M365-Copilot2API 的 Go 主项目，接入 Ciallo 的个人 Copilot 通信核心。不是“Python 主站换皮”：管理、账号存储、调度、API Key、会话、用量、Chat Completions / Responses / Messages 协议转换都由原 Go 服务承担。
 
-## 功能
+## 界面
 
-- 中文 React 控制台：总览、账号管理、密钥创建/绑定/启停、真实对话测试、个人账号接入指南。
-- Ciallo Consumer 核心及原生高级管理、用户自助页保留。
-- 管理员会话采用上游 HttpOnly Cookie；密钥仅保存在页面内存，不写入 localStorage。
-- 默认仅监听 127.0.0.1:4142，需 HTTPS 反代；640MB 容器上限，不启用共享浏览器。
+- 根路径保留原版完整控制台；/webapp/ 保留上游 React 控制台。
+- 不更换配色、字体、侧栏、表格、卡片与交互风格。
+- 在账号页增加个人凭据导入；原企业授权保留为可选入口。
+- 默认个人版模型目录：copilot、copilot-reasoning、copilot-thinking、copilot-chat、copilot-search、copilot-research、copilot-study、copilot-coco。它们是个人版模式，不是对应企业 GPT / Claude 模型的保证。
+
+## 架构
+
+用户 → OpenResty HTTPS → Go 主服务 → 私有 Consumer 通信组件 → 微软个人版 Copilot。
+
+Consumer 组件仅执行 Ciallo 的 curl_cffi HTTP/WebSocket 通信；没有独立面板、账号数据库或公网端口。Go 将当前轮的必要凭据通过私有容器网络传入，通信组件不持久化账号。此方案保留原通信实现所需的 TLS 行为，而非假称已将全部 Python 协议重写成 Go。
 
 ## 部署
 
-复制 .env.example 为 .env，设置足够强且不同的 ADMIN_PASSWORD 和 API_KEY。切勿留空，否则上游部分接口可能无需认证。
+1. 复制 .env.example 为 .env，生成不同的高强度 M365_MASTER_KEY 和 M365_CONSUMER_TRANSPORT_KEY。
+2. 创建 secrets/admin-password，写入管理员密码。仅让部署用户和网关容器读到它，禁止提交 GitHub。
+3. docker compose up -d --build。Go 主服务只映射 127.0.0.1:4143，通信组件不映射宿主机端口。
+4. OpenResty 反代到该端口，保持 WebSocket、SSE 无缓冲和 HTTPS。
+5. 默认 M365_CONSUMER_ONLY=1 仅展示个人模式；企业 OAuth 核心代码保留。容器内存上限分别为 384MB 与 256MB，个人请求串行处理。
 
-```
-docker compose up -d --build
-```
+## 接入个人账号
 
-反向代理到 127.0.0.1:4142，启用 HTTPS、SSE 无缓冲和 WebSocket 转发。将站点根路径跳转 /console/，将 /self-service 反代到后端 /，其他路径原样转发。示例 compose 的域名与 ALLOWED_ORIGINS 请改成自己的域名。
+1. 在自己的浏览器安装 Tampermonkey BETA；控制台账号页提供导出脚本。
+2. 登录 copilot.microsoft.com 并发送消息，点击脚本的“导出个人版凭据”。无需把管理员密码或 API Key 填入脚本。
+3. 在控制台账号页导入 JSON。凭据含 Cookie / Token，等同登录材料；不要公开，用完妥善移除下载文件。
+4. 去模型测试做真实验证，然后用原版 API Key 管理创建调用密钥。
 
-- /console/：新融合控制台，使用 ADMIN_PASSWORD。
-- /admin：原生高级管理。
-- /self-service：用户自助页，使用绑定账号的 API Key。
-- /v1：兼容接口基础地址。
+## 保留与限制
 
-## 个人账号接入
+- 保留原 Go 会话、用量、工具路由和协议处理。个人版工具调用仍是提示词/文本解析，依赖模型服从性，不是微软原生工具接口。
+- 保留个人版文本流、模式选择、图片输入和上游返回的图片文本片段；图片型 /v1/images 端点没有被伪装成已迁移的个人出图 API。
+- 支持带身份校验、并发合并和落盘加密的个人刷新令牌续期；按请求临期触发。Cookie 失效、无可用刷新令牌或微软拒绝时需手动重新导入。未安装 Camoufox 后备浏览器，不承诺永久登录。
+- 个人历史由 Go 服务维护，每轮向个人上游发送当前上下文；不声称同步个人版网页全部云端历史。会话页会显示这一限制。
+- 企业云端记忆、租户数据和 Studio 能力不适用于个人账号，不会通过改模型名获得权限。
+- 原简化 Python 主站已由此次重构替代，旧密码保留。历史提交可用于回滚。
 
-1. 在账号管理创建空账号，然后创建绑定到该账号的 API Key。
-2. 安装 Tampermonkey BETA，并在控制台指南中安装本仓库 get_token.user.js。审阅后只向你信任的服务器推送凭据。
-3. 在自己的浏览器打开 copilot.microsoft.com，登录个人账号并发送消息。
-4. 脚本中填写自己的站点地址和 API Key，点击“一键推送个人版”。不要使用 M365 Only 授权按钮。
-5. 回控制台刷新，确认 Consumer 凭据已导入，再做真实聊天测试。
+## 验证
 
-默认不包含 Camoufox：部分自动续期路径不可用，失效后需重新推送；不能保证永不过期。Cookie/Token 等同账号凭据，不要提交到代码仓库。
+Go: go test ./...；React: cd webapp && npm ci && npm run build；通信组件: pytest consumer/test_service.py。
 
-## 验证与限制
+模拟上游的集成测试覆盖三种协议的流式与非流式转换。生产中未经本人微软授权，不得把这些测试与健康检查等同真实模型验收。详见 ACCEPTANCE.md。
 
-前端：进入 console 执行 npm ci 和 npm run build。后端：uv sync --extra dev 后执行 uv run pytest。
+## 来源与许可证
 
-完整上游资料见 README.upstream.md。真实协议验收状态见 ACCEPTANCE.md。未完成微软账号授权前，不可把健康检查成功说成模型调用成功。消费者协议及工具能力会随微软变更。
-
-## 来源与许可
-
-详见 NOTICE.md、LICENSE 和 licenses/。组合发行保留 M365-Copilot2API 的 AGPL 文本和非商业 API 转售限制，以及 Ciallo 的 Apache 通知。仅供有权使用账号的用户使用，不提供账号、不绕过账号权限、不承诺免费额度。
+基座 HEXUXIU/M365-Copilot2API（完整 AGPL 文本及附加非商业 API 转售限制见 LICENSE）；个人协议 MurasameCyan/Ciallo-Ms-365-OpenAI-Proxy-Docker（Apache 通知见 licenses/Ciallo-LICENSE）。详见 NOTICE.md。仅使用你有权使用的账号，不提供微软账号或权限绕过。

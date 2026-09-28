@@ -1,9 +1,15 @@
 __pycache__/
 node_modules/
+*.exe
+*.test
+out/
 console/dist/
 *.tar.gz
 *.pyc
 .env
+secrets/
+api-keys.json
+admin-password*
 .chrome-profile/
 
 # Debug scratch dirs and runtime credential/state files (never commit)
