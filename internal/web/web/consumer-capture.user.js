@@ -231,7 +231,7 @@
             other_site_m365: 'open m365.cloud.microsoft to use',
             other_site_consumer: 'open copilot.microsoft.com to use',
             consumer_desc: 'Push cookies + ChatAI token to the current account.',
-            consumer_one_click: 'Push Personal',
+            consumer_one_click: 'Export Personal Credentials',
             m365_needs_site: 'Open m365.cloud.microsoft and sign in first; M365 credentials cannot be collected from this page.',
             consumer_needs_site: 'Open copilot.microsoft.com and send one message first; personal credentials cannot be collected from this page.',
             quick_setup_desc: 'Push Token and Cookies to the current account.',

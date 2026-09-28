@@ -50,7 +50,7 @@ func (s *Server) consumerScript(w http.ResponseWriter, r *http.Request) {
 
 func consumerMode(model string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "copilot", "copilot-smart":
+	case "copilot", "copilot-smart", "auto":
 		return "smart", true
 	case "copilot-reasoning", "copilot-thinking":
 		return "reasoning", true
