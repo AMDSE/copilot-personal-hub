@@ -15,6 +15,16 @@ Deployment health and administration tests do not establish Microsoft chat avail
 
 ## Local checks on 2026-09-28
 
+## Deployed administration checks on 2026-09-28
+
+- New container is running and healthy, bound only to 127.0.0.1:4142, with a 640MiB memory ceiling. Idle sample about 90MiB.
+- Server smoke check passed: console/script/health, anonymous 401 responses, secure HttpOnly admin session, temporary account/key create-disable-delete. Temporary production smoke records removed.
+- Public HTTPS root redirects to /console/ and returns 200; /self-service and userscript return 200; unauthenticated /admin/accounts returns 401. Browser renders the deployed dashboard.
+- Old m365-copilot2api container stopped with restart=no. Original volume, image, configuration and credentials retained for rollback; no other services removed.
+- Microsoft live acceptance matrix above remains blocked by account authorization. Health checks are not a successful chat test.
+
+### Local test details
+
 - React TypeScript check and Vite production build: passed. npm audit: zero reported vulnerabilities at install time.
 - Focused console/auth/account/consumer tests: 61 passed.
 - Wider Python run, excluding two uncollectable test modules: 2074 passed, 3 skipped, 2 failed. Failures: absent upstream Docker CI workflow (not copied to this fork), optional Camoufox package not installed in the lightweight environment.
