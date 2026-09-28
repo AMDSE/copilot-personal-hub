@@ -9,6 +9,9 @@ services:
     environment:
       ENABLE_ADMIN_CDP: "false"
       ADMIN_COOKIE_SECURE: "1"
+      GITHUB_REPO: "AMDSE/copilot-personal-hub"
+      GITHUB_TRACK_REF: "main"
+      GIT_COMMIT: "${HUB_BUILD_COMMIT:-unknown}"
       ALLOWED_ORIGINS: "https://copilot.0712121.xyz,https://copilot.microsoft.com"
     volumes:
       - hub-data:/home/app/token
