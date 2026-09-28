@@ -97,7 +97,7 @@ func defaultRuntimeSettings() runtimeSettings {
 		DebugLogPath: os.Getenv("M365_DEBUG_LOG"), ListenAddress: os.Getenv("M365_LISTEN"), ConfigPath: os.Getenv("M365_CONFIG"),
 		TokenCachePath: os.Getenv("M365_TOKEN_CACHE"), SessionCachePath: os.Getenv("M365_SESSION_CACHE"), OutboundProxy: os.Getenv(outbound.EnvProxy), ClientID: os.Getenv("M365_CLIENT_ID"),
 		Authority: os.Getenv("M365_AUTHORITY"), RedirectURI: os.Getenv("M365_REDIRECT_URI"), Scope: os.Getenv("M365_SCOPE"),
-		ModelMappings:                     append([]modelMapping(nil), defaultModelMappings...),
+		ModelMappings:                     providerDefaultMappings(),
 		ToolPlanningMode:                  toolPlanningMode(os.Getenv("M365_TOOL_PLANNING_MODE")),
 		RateLimitCooldownSeconds:          envInt("M365_RATE_LIMIT_COOLDOWN_SECONDS", 30),
 		TransientThrottledCooldownSeconds: envInt("M365_TRANSIENT_THROTTLED_COOLDOWN_SECONDS", 15),

@@ -5,6 +5,7 @@ import (
 	"m365-copilot2api/internal/auth"
 	"m365-copilot2api/internal/chathub"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -75,4 +76,28 @@ func consumerModelSpecs() []modelSpec {
 		result = append(result, modelSpec{ID: id, Owner: "microsoft-consumer", DisplayName: id, Tools: true})
 	}
 	return result
+}
+
+func providerDefaultMappings() []modelMapping {
+	if os.Getenv("M365_CONSUMER_ONLY") != "1" {
+		return append([]modelMapping(nil), defaultModelMappings...)
+	}
+	result := []modelMapping{}
+	for _, spec := range consumerModelSpecs() {
+		mode, _ := consumerMode(spec.ID)
+		result = append(result, modelMapping{PublicModel: spec.ID, UpstreamTone: mode, DisplayName: spec.ID})
+	}
+	return result
+}
+
+func consumerMappedTone(model string, mappings []modelMapping) (string, bool) {
+	mapping, ok := configuredModelMapping(model, mappings)
+	if !ok {
+		return "", false
+	}
+	switch mapping.UpstreamTone {
+	case "smart", "reasoning", "chat", "search", "research", "study", "coco":
+		return mapping.UpstreamTone, true
+	}
+	return "", false
 }

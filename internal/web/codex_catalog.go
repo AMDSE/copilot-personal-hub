@@ -93,6 +93,9 @@ func isImageModel(model string) bool {
 func isKnownPublicModel(model string) bool {
 	id := strings.ToLower(strings.TrimSpace(model))
 	if os.Getenv("M365_CONSUMER_ONLY") == "1" {
+		if _, ok := consumerMappedTone(id, currentSettings().ModelMappings); ok {
+			return true
+		}
 		_, ok := consumerMode(id)
 		return ok
 	}
@@ -227,7 +230,18 @@ func configuredModelTone(model string, mappings []modelMapping) (string, bool) {
 
 func configuredModelSpecs(mappings []modelMapping) []modelSpec {
 	if os.Getenv("M365_CONSUMER_ONLY") == "1" {
-		return consumerModelSpecs()
+		models := consumerModelSpecs()
+		seen := map[string]bool{}
+		for _, model := range models {
+			seen[model.ID] = true
+		}
+		for _, mapping := range mappings {
+			if _, ok := consumerMappedTone(mapping.PublicModel, mappings); ok && !seen[mapping.PublicModel] {
+				models = append(models, modelSpec{ID: mapping.PublicModel, Owner: "microsoft-consumer", DisplayName: mapping.DisplayName, Tools: true})
+				seen[mapping.PublicModel] = true
+			}
+		}
+		return models
 	}
 	models := append([]modelSpec(nil), gatewayModels...)
 	for _, mapping := range mappings {
@@ -281,6 +295,11 @@ func normalizeReasoningEffort(e string) (string, error) {
 	return "", fmt.Errorf("unsupported reasoning effort %q; use none, minimal, low, medium, high, or xhigh", e)
 }
 func reasoningTone(model, effort string) (string, error) {
+	if os.Getenv("M365_CONSUMER_ONLY") == "1" {
+		if tone, ok := consumerMappedTone(model, currentSettings().ModelMappings); ok {
+			return tone, nil
+		}
+	}
 	if mode, ok := consumerMode(model); ok {
 		return mode, nil
 	}
