@@ -447,6 +447,9 @@ func (s *Server) adminMiddleware(next http.Handler) http.Handler {
 }
 
 func secureAdminCookie(r *http.Request) bool {
+	if os.Getenv("M365_COOKIE_SECURE") == "1" {
+		return true
+	}
 	if r.TLS != nil {
 		return true
 	}
